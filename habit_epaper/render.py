@@ -1,7 +1,6 @@
 import calendar
-import os
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,96 +29,6 @@ def _load_font(size, bold=False):
     return ImageFont.load_default()
 
 
-ASSET_DIR = os.path.join(os.path.dirname(__file__), "assets")
-
-CHARACTERS = [
-    {"key": "cat", "label": "Mood Cat"},
-    {"key": "fire", "label": "Fire Critter"},
-    {"key": "ground", "label": "Ground Critter"},
-    {"key": "electric", "label": "Electric Bird"},
-    {"key": "goo", "label": "Goo Critter"},
-]
-
-
-ROTATION_ANCHOR = date(2026, 1, 1)
-def _ensure_character_assets(cfg):
-    os.makedirs(ASSET_DIR, exist_ok=True)
-
-    def _save(img, name):
-        path = os.path.join(ASSET_DIR, name)
-        if not os.path.exists(path):
-            img.save(path)
-
-    def _base():
-        return Image.new("RGB", (140, 140), cfg.white)
-
-    # Mood cat
-    img = _base()
-    d = ImageDraw.Draw(img)
-    d.ellipse((20, 25, 120, 125), outline=cfg.black, width=3)
-    d.polygon([(28, 45), (16, 10), (48, 30)], outline=cfg.black)
-    d.polygon([(112, 45), (124, 10), (92, 30)], outline=cfg.black)
-    d.polygon([(28, 45), (22, 18), (42, 30)], outline=cfg.red, fill=cfg.red)
-    d.polygon([(112, 45), (118, 18), (98, 30)], outline=cfg.red, fill=cfg.red)
-    d.ellipse((45, 60, 55, 70), fill=cfg.black)
-    d.ellipse((85, 60, 95, 70), fill=cfg.black)
-    d.arc((50, 80, 90, 110), 200, 340, fill=cfg.black, width=3)
-    d.ellipse((68, 80, 72, 84), fill=cfg.red)
-    _save(img, "cat.png")
-
-    # Fire critter
-    img = _base()
-    d = ImageDraw.Draw(img)
-    d.ellipse((30, 40, 110, 120), outline=cfg.black, width=3)
-    d.polygon([(70, 10), (55, 40), (85, 40)], outline=cfg.red, fill=cfg.red)
-    d.polygon([(75, 60), (120, 75), (75, 90)], outline=cfg.black, fill=(200, 100, 0))
-    d.ellipse((55, 70, 65, 80), fill=cfg.black)
-    _save(img, "fire.png")
-
-    # Ground critter
-    img = _base()
-    d = ImageDraw.Draw(img)
-    d.ellipse((25, 30, 115, 120), outline=cfg.black, width=3)
-    d.arc((40, 50, 100, 100), 0, 180, fill=cfg.black, width=3)
-    d.arc((40, 40, 100, 80), 200, 340, fill=cfg.red, width=3)
-    for x in (40, 60, 80):
-        d.line((x, 110, x - 8, 130), fill=cfg.black, width=3)
-    _save(img, "ground.png")
-
-    # Electric bird
-    img = _base()
-    d = ImageDraw.Draw(img)
-    d.polygon(
-        [(20, 70), (60, 40), (70, 70), (90, 45), (110, 80), (70, 90)],
-        outline=cfg.black,
-        fill=(255, 220, 0),
-    )
-    d.polygon([(70, 90), (80, 120), (60, 120)], outline=cfg.black, fill=(255, 220, 0))
-    d.ellipse((60, 60, 70, 70), fill=cfg.black)
-    d.line((70, 90, 95, 115), fill=cfg.red, width=3)
-    _save(img, "electric.png")
-
-    # Goo critter
-    img = _base()
-    d = ImageDraw.Draw(img)
-    d.ellipse((25, 50, 115, 120), outline=cfg.black, width=3)
-    d.ellipse((40, 45, 100, 100), outline=cfg.black, width=3)
-    d.ellipse((55, 70, 60, 75), fill=cfg.black)
-    d.ellipse((80, 70, 85, 75), fill=cfg.black)
-    d.line((60, 90, 85, 90), fill=cfg.black, width=3)
-    d.ellipse((48, 88, 54, 94), fill=cfg.red)
-    d.ellipse((90, 88, 96, 94), fill=cfg.red)
-    _save(img, "goo.png")
-
-
-def _select_character(today):
-    quarter = (today.month - 1) // 3
-    anchor_quarter = (ROTATION_ANCHOR.month - 1) // 3
-    quarters_since = (today.year - ROTATION_ANCHOR.year) * 4 + (quarter - anchor_quarter)
-    idx = quarters_since % len(CHARACTERS)
-    return CHARACTERS[idx]
-
-
 def compute_weighted_mood(last_14_rows):
     # last_14_rows: list of (day_iso, read, journal, workout), oldest->newest
     if not last_14_rows:
@@ -136,88 +45,54 @@ def compute_weighted_mood(last_14_rows):
     return max(0, min(9, level))
 
 
-def _draw_mood_cat(draw, box, level, cfg):
-    # Simple cat face with mouth curvature based on level
+def _draw_streak_widget(draw, box, streak_current, streak_best, today_score, cfg):
     x0, y0, x1, y1 = box
-    cx = (x0 + x1) // 2
-    cy = (y0 + y1) // 2
-    r = min(x1 - x0, y1 - y0) // 2 - 4
+    draw.rectangle((x0, y0, x1, y1), outline=cfg.black, width=1)
+    draw.line((x0, y0 + 24, x1, y0 + 24), fill=cfg.black, width=1)
 
-    # Head
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=cfg.black, width=2)
-    # Ears
-    draw.polygon([(cx - r + 4, cy - r + 6), (cx - r - 6, cy - r - 12), (cx - r + 16, cy - r - 6)], outline=cfg.black)
-    draw.polygon([(cx + r - 4, cy - r + 6), (cx + r + 6, cy - r - 12), (cx + r - 16, cy - r - 6)], outline=cfg.black)
-
-    # Eyes
-    eye_offset_x = r // 2
-    eye_offset_y = r // 5
-    draw.ellipse((cx - eye_offset_x - 6, cy - eye_offset_y - 4, cx - eye_offset_x + 6, cy - eye_offset_y + 4), fill=cfg.black)
-    draw.ellipse((cx + eye_offset_x - 6, cy - eye_offset_y - 4, cx + eye_offset_x + 6, cy - eye_offset_y + 4), fill=cfg.black)
-
-    # Mouth: map level 0..9 to curvature
-    # negative for frown, positive for smile
-    curvature = (level - 4.5) / 4.5  # -1..1
-    mouth_y = cy + r // 3
-    mouth_w = r // 2
-    mouth_h = int(r // 3 * abs(curvature))
-    if curvature >= 0:
-        # smile arc
-        draw.arc((cx - mouth_w, mouth_y - mouth_h, cx + mouth_w, mouth_y + mouth_h), 200, 340, fill=cfg.black, width=2)
-    else:
-        # frown arc
-        draw.arc((cx - mouth_w, mouth_y - mouth_h, cx + mouth_w, mouth_y + mouth_h), 20, 160, fill=cfg.black, width=2)
+    title_font = _load_font(14, bold=True)
+    value_font = _load_font(13)
+    draw.text((x0 + 8, y0 + 4), "Streak", font=title_font, fill=cfg.black)
+    draw.text((x0 + 60, y0 + 4), f"{streak_current}d / best {streak_best}d", font=value_font, fill=cfg.black)
+    draw.text((x0 + 8, y0 + 30), "Today", font=title_font, fill=cfg.black)
+    draw.text((x0 + 60, y0 + 30), f"{today_score}/3", font=value_font, fill=cfg.red if today_score < 3 else cfg.black)
 
 
-def _draw_character(img, draw, box, level, cfg, today):
-    _ensure_character_assets(cfg)
-    character = _select_character(today)
-    key = character["key"]
-    if key == "cat":
-        _draw_mood_cat(draw, box, level, cfg)
-        return character
-
-    path = os.path.join(ASSET_DIR, f"{key}.png")
-    try:
-        char_img = Image.open(path).convert("RGB")
-        w = box[2] - box[0]
-        h = box[3] - box[1]
-        char_img = char_img.resize((w, h))
-        img.paste(char_img, (box[0], box[1]))
-    except OSError:
-        _draw_mood_cat(draw, box, level, cfg)
-        character = {"key": "cat", "label": "Mood Cat"}
-    return character
-
-def _draw_book(draw, x, y, w, h, cfg):
-    # Three horizontal lines
-    spacing = h // 4
-    for i in range(3):
-        y_line = y + i * spacing
-        draw.line((x, y_line, x + w, y_line), fill=cfg.black, width=2)
+def _draw_read_dots(draw, x, y, w, h, cfg):
+    radius = max(2, min(w, h) // 7)
+    centers = (
+        (x + w * 0.2, y + h * 0.5),
+        (x + w * 0.5, y + h * 0.5),
+        (x + w * 0.8, y + h * 0.5),
+    )
+    for cx, cy in centers:
+        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=cfg.black)
 
 
-def _draw_hatch(draw, x, y, w, h, cfg):
-    # Diagonal red hatch
-    step = 5
-    for i in range(-h, w, step):
-        draw.line((x + i, y, x + i + h, y + h), fill=cfg.red, width=1)
+def _draw_journal_slashes(draw, x, y, w, h, cfg):
+    step = max(4, w // 4)
+    for i in range(-h, w + h, step):
+        draw.line((x + i, y + h, x + i + h, y), fill=cfg.red, width=2)
 
 
-def _draw_bolt(draw, x, y, w, h, cfg):
-    # Simple lightning bolt
-    points = [
-        (x + w * 0.2, y),
-        (x + w * 0.6, y),
-        (x + w * 0.4, y + h * 0.55),
-        (x + w * 0.8, y + h * 0.55),
-        (x + w * 0.3, y + h),
-        (x + w * 0.5, y + h * 0.45),
-    ]
-    draw.line(points, fill=cfg.black, width=2)
+def _draw_workout_checker(draw, x, y, w, h, cfg):
+    draw.rectangle((x, y, x + w, y + h), outline=cfg.black, width=1)
+    cols = 4
+    rows = 3
+    cell_w = max(2, w // cols)
+    cell_h = max(2, h // rows)
+    for r in range(rows):
+        for c in range(cols):
+            if (r + c) % 2 == 0:
+                cx0 = x + c * cell_w + 1
+                cy0 = y + r * cell_h + 1
+                cx1 = min(x + (c + 1) * cell_w - 1, x + w - 1)
+                cy1 = min(y + (r + 1) * cell_h - 1, y + h - 1)
+                if cx1 > cx0 and cy1 > cy0:
+                    draw.rectangle((cx0, cy0, cx1, cy1), fill=cfg.black)
 
 
-def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cfg=None):
+def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cfg=None, streak_current=0, streak_best=0, today_score=0):
     cfg = cfg or RenderConfig()
     img = Image.new("RGB", (cfg.width, cfg.height), cfg.white)
     draw = ImageDraw.Draw(img)
@@ -227,17 +102,14 @@ def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cf
 
     title_font = _load_font(28, bold=True)
     small_font = _load_font(14)
-    medium_font = _load_font(18)
-
     month_name = date(year, month, 1).strftime("%B %Y")
     draw.text((cfg.margin, cfg.margin), month_name, font=title_font, fill=cfg.black)
 
     ytd_text = f"YTD totals  Read: {ytd_totals['read']}  Journal: {ytd_totals['journal']}  Workout: {ytd_totals['workout']}"
     draw.text((cfg.margin, cfg.margin + 36), ytd_text, font=small_font, fill=cfg.black)
 
-    # Mood cat box
-    cat_box = (cfg.width - 160, cfg.margin - 49, cfg.width - 20, cfg.margin + 91)
-    character = _draw_character(img, draw, cat_box, mood_level, cfg, today)
+    widget_box = (cfg.width - 260, cfg.margin, cfg.width - cfg.margin, cfg.margin + 52)
+    _draw_streak_widget(draw, widget_box, streak_current, streak_best, today_score, cfg)
 
     # Grid
     grid_top = cfg.margin + 80
@@ -292,11 +164,11 @@ def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cf
             icon_x = x0 + 6
 
             if read:
-                _draw_book(draw, icon_x, icon_y, icon_w, icon_h, cfg)
+                _draw_read_dots(draw, icon_x, icon_y, icon_w, icon_h, cfg)
             if journal:
-                _draw_hatch(draw, icon_x + icon_w + 8, icon_y, icon_w, icon_h, cfg)
+                _draw_journal_slashes(draw, icon_x + icon_w + 8, icon_y, icon_w, icon_h, cfg)
             if workout:
-                _draw_bolt(draw, icon_x + 2 * (icon_w + 8), icon_y, icon_w, icon_h, cfg)
+                _draw_workout_checker(draw, icon_x + 2 * (icon_w + 8), icon_y, icon_w, icon_h, cfg)
 
     return img
 

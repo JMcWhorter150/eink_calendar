@@ -41,13 +41,44 @@ def _compute_mood_level(today):
     return render.compute_weighted_mood(rows)
 
 
+def _compute_streak_stats(today):
+    n_days = max(1, today.timetuple().tm_yday)
+    rows = db.last_n_days_rows(today, n_days)
+
+    best = 0
+    current = 0
+    running = 0
+    for _, read, journal, workout in rows:
+        is_complete = int(read) + int(journal) + int(workout) == 3
+        if is_complete:
+            running += 1
+            if running > best:
+                best = running
+        else:
+            running = 0
+    current = running
+    return {"current": current, "best": best}
+
+
 def _do_refresh():
     today = date.today()
     month_data = db.get_month(today.year, today.month)
     ytd_totals = db.ytd_counts(today.year)
     mood_level = _compute_mood_level(today)
+    streak_stats = _compute_streak_stats(today)
+    today_score = sum(month_data.get(today.day, (0, 0, 0)))
 
-    img = render.render_month(today.year, today.month, month_data, ytd_totals, mood_level, today=today)
+    img = render.render_month(
+        today.year,
+        today.month,
+        month_data,
+        ytd_totals,
+        mood_level,
+        today=today,
+        streak_current=streak_stats["current"],
+        streak_best=streak_stats["best"],
+        today_score=today_score,
+    )
 
     if os.environ.get("HABIT_EPAPER_DISABLE_DISPLAY"):
         return
