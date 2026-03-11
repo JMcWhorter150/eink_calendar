@@ -1,0 +1,17 @@
+[Unit]
+Description=Habit ePaper server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/habit-epaper
+Environment=HABIT_ADDR=:8000
+Environment=HABIT_DB_PATH=/opt/habit-epaper/habit_epaper/habit.db
+ExecStart=/opt/habit-epaper/habit-epaper
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

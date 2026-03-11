@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily 6am Habit ePaper refresh
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+Unit=habit-epaper-refresh.service
+
+[Install]
+WantedBy=timers.target
