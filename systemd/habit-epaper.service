@@ -6,10 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/habit-epaper
+WorkingDirectory=/home/josephmcwhorter/go_eink_calendar/eink_calendar/
 Environment=HABIT_ADDR=:8000
-Environment=HABIT_DB_PATH=/opt/habit-epaper/habit_epaper/habit.db
-ExecStart=/opt/habit-epaper/habit-epaper
+Environment=HABIT_DB_PATH=/home/josephmcwhorter/go_eink_calendar/eink_calendar/habit_epaper/habit.db
+ExecStart=/home/josephmcwhorter/go_eink_calendar/eink_calendar/eink_calendar
 Restart=on-failure
 RestartSec=5
 

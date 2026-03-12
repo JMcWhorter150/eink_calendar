@@ -1,7 +1,7 @@
 [Unit]
 Description=Queue a Habit ePaper refresh
-After=habit-epaper.service
-Requires=habit-epaper.service
+After=go-habit-epaper.service
+Requires=go-habit-epaper.service
 
 [Service]
 Type=oneshot
