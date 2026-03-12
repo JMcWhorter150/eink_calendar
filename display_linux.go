@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	rstPin  = 17
-	dcPin   = 25
-	busyPin = 24
+	rstPin      = 17
+	dcPin       = 25
+	busyPin     = 24
+	maxSPIWrite = 4096
 )
 
 type epd struct {
@@ -231,5 +232,15 @@ func (e *epd) sendData(value byte) error {
 
 func (e *epd) sendDataBytes(data []byte) error {
 	e.dc.High()
-	return e.conn.Tx(data, nil)
+	for len(data) > 0 {
+		chunkSize := maxSPIWrite
+		if len(data) < chunkSize {
+			chunkSize = len(data)
+		}
+		if err := e.conn.Tx(data[:chunkSize], nil); err != nil {
+			return err
+		}
+		data = data[chunkSize:]
+	}
+	return nil
 }
