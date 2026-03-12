@@ -62,6 +62,9 @@ func displayImage(img image.Image) error {
 	if err := dev.init(); err != nil {
 		return err
 	}
+	if err := dev.clear(); err != nil {
+		return err
+	}
 	black, red := splitDisplayLayers(img)
 	if err := dev.display(black, red); err != nil {
 		return err
@@ -71,52 +74,123 @@ func displayImage(img image.Image) error {
 
 func (e *epd) init() error {
 	e.reset()
-	e.sendCommand(0x01)
-	e.sendDataBytes([]byte{0x07, 0x07, 0x3f, 0x3f})
-	e.sendCommand(0x06)
-	e.sendDataBytes([]byte{0x17, 0x17, 0x28, 0x17})
-	e.sendCommand(0x04)
+	if err := e.sendCommand(0x01); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes([]byte{0x07, 0x07, 0x3f, 0x3f}); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x06); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes([]byte{0x17, 0x17, 0x28, 0x17}); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x04); err != nil {
+		return err
+	}
 	time.Sleep(100 * time.Millisecond)
 	if err := e.waitUntilIdle(90 * time.Second); err != nil {
 		return err
 	}
-	e.sendCommand(0x00)
-	e.sendData(0x0F)
-	e.sendCommand(0x61)
-	e.sendDataBytes([]byte{0x03, 0x20, 0x01, 0xE0})
-	e.sendCommand(0x15)
-	e.sendData(0x00)
-	e.sendCommand(0x50)
-	e.sendDataBytes([]byte{0x11, 0x07})
-	e.sendCommand(0x60)
-	e.sendData(0x22)
-	return nil
+	if err := e.sendCommand(0x00); err != nil {
+		return err
+	}
+	if err := e.sendData(0x0F); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x61); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes([]byte{0x03, 0x20, 0x01, 0xE0}); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x15); err != nil {
+		return err
+	}
+	if err := e.sendData(0x00); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x50); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes([]byte{0x11, 0x07}); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x60); err != nil {
+		return err
+	}
+	return e.sendData(0x22)
+}
+
+func (e *epd) clear() error {
+	rowBytes := canvasWidth / 8
+	height := canvasHeight
+
+	if err := e.sendCommand(0x10); err != nil {
+		return err
+	}
+	for i := 0; i < rowBytes*height; i++ {
+		if err := e.sendData(0xFF); err != nil {
+			return err
+		}
+	}
+	if err := e.sendCommand(0x13); err != nil {
+		return err
+	}
+	for i := 0; i < rowBytes*height; i++ {
+		if err := e.sendData(0x00); err != nil {
+			return err
+		}
+	}
+	if err := e.sendCommand(0x12); err != nil {
+		return err
+	}
+	time.Sleep(10 * time.Millisecond)
+	return e.waitUntilIdle(180 * time.Second)
 }
 
 func (e *epd) display(black, red []byte) error {
-	e.sendCommand(0x10)
-	e.sendDataBytes(black)
-	e.sendCommand(0x13)
+	if err := e.sendCommand(0x10); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes(black); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x13); err != nil {
+		return err
+	}
 	inverted := make([]byte, len(red))
 	for i, b := range red {
 		inverted[i] = ^b
 	}
-	e.sendDataBytes(inverted)
-	e.sendCommand(0x12)
+	if err := e.sendDataBytes(inverted); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x12); err != nil {
+		return err
+	}
 	time.Sleep(10 * time.Millisecond)
 	return e.waitUntilIdle(180 * time.Second)
 }
 
 func (e *epd) sleep() error {
-	e.sendCommand(0x50)
-	e.sendData(0xF7)
-	e.sendCommand(0x02)
+	if err := e.sendCommand(0x50); err != nil {
+		return err
+	}
+	if err := e.sendData(0xF7); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x02); err != nil {
+		return err
+	}
 	if err := e.waitUntilIdle(30 * time.Second); err != nil {
 		return err
 	}
-	e.sendCommand(0x07)
-	e.sendData(0xA5)
-	return nil
+	if err := e.sendCommand(0x07); err != nil {
+		return err
+	}
+	return e.sendData(0xA5)
 }
 
 func (e *epd) reset() {
@@ -131,7 +205,9 @@ func (e *epd) reset() {
 func (e *epd) waitUntilIdle(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		e.sendCommand(0x71)
+		if err := e.sendCommand(0x71); err != nil {
+			return err
+		}
 		if e.busy.Read() == rpio.High {
 			time.Sleep(20 * time.Millisecond)
 			return nil
@@ -143,17 +219,17 @@ func (e *epd) waitUntilIdle(timeout time.Duration) error {
 	}
 }
 
-func (e *epd) sendCommand(cmd byte) {
+func (e *epd) sendCommand(cmd byte) error {
 	e.dc.Low()
-	_ = e.conn.Tx([]byte{cmd}, nil)
+	return e.conn.Tx([]byte{cmd}, nil)
 }
 
-func (e *epd) sendData(value byte) {
+func (e *epd) sendData(value byte) error {
 	e.dc.High()
-	_ = e.conn.Tx([]byte{value}, nil)
+	return e.conn.Tx([]byte{value}, nil)
 }
 
-func (e *epd) sendDataBytes(data []byte) {
+func (e *epd) sendDataBytes(data []byte) error {
 	e.dc.High()
-	_ = e.conn.Tx(data, nil)
+	return e.conn.Tx(data, nil)
 }
