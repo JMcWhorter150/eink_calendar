@@ -24,6 +24,7 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 	"golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -36,15 +37,15 @@ const (
 	minSecondsBetweenRefresh = 300
 	defaultAddr              = ":8000"
 	defaultDBPath            = "habit_epaper/habit.db"
-	displayBlackThreshold    = 185
-	displayRedThreshold      = 150
-	displayRedDelta          = 40
+	displayBlackThreshold    = 220
+	displayRedThreshold      = 120
+	displayRedDelta          = 20
 )
 
 var (
 	colorWhite = color.RGBA{255, 255, 255, 255}
 	colorBlack = color.RGBA{0, 0, 0, 255}
-	colorRed   = color.RGBA{200, 0, 0, 255}
+	colorRed   = color.RGBA{255, 0, 0, 255}
 )
 
 type habitRow struct {
@@ -76,6 +77,7 @@ type renderer struct {
 	headerFace font.Face
 	bodyFace   font.Face
 	smallFace  font.Face
+	crispFace  font.Face
 }
 
 type faceSpec struct {
@@ -224,6 +226,7 @@ func newRenderer() (*renderer, error) {
 		headerFace: headerFace,
 		bodyFace:   bodyFace,
 		smallFace:  smallFace,
+		crispFace:  basicfont.Face7x13,
 	}, nil
 }
 
@@ -245,19 +248,7 @@ func (s *server) renderCurrentMonth(now time.Time) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	mood, err := computeMoodLevel(s.db, now)
-	if err != nil {
-		return nil, err
-	}
-	streakCurrent, streakBest, err := computeStreaks(s.db, now)
-	if err != nil {
-		return nil, err
-	}
-	todayState, err := getDay(s.db, now.Format(time.DateOnly))
-	if err != nil {
-		return nil, err
-	}
-	img := s.renderer.renderMonth(now, monthData, ytd, mood, streakCurrent, streakBest, todayState.Read+todayState.Journal+todayState.Workout)
+	img := s.renderer.renderMonth(now, monthData, ytd)
 	return img, nil
 }
 
@@ -725,17 +716,21 @@ func writePNG(path string, img image.Image) error {
 	return png.Encode(file, img)
 }
 
-func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd totals, moodLevel, streakCurrent, streakBest, todayScore int) *image.RGBA {
+func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd totals) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, canvasWidth, canvasHeight))
 	draw.Draw(img, img.Bounds(), &image.Uniform{colorWhite}, image.Point{}, draw.Src)
 
 	r.drawText(img, 20, 48, today.Format("January 2006"), colorBlack, r.titleFace)
-	ytdText := fmt.Sprintf("YTD  Read %d   Journal %d   Workout %d", ytd.Read, ytd.Journal, ytd.Workout)
-	r.drawText(img, 20, 76, ytdText, colorBlack, r.bodyFace)
-	r.drawStreakPanel(img, image.Rect(20, 84, 250, 136), streakCurrent, streakBest, todayScore)
-	r.drawMoodCat(img, image.Rect(620, 16, 780, 140), moodLevel)
+	r.drawText(
+		img,
+		20,
+		78,
+		fmt.Sprintf("YTD   READ %d   JOURNAL %d   WORKOUT %d", ytd.Read, ytd.Journal, ytd.Workout),
+		colorBlack,
+		r.headerFace,
+	)
 
-	gridTop := 158
+	gridTop := 96
 	gridLeft := 20
 	gridRight := canvasWidth - 20
 	gridBottom := canvasHeight - 20
@@ -747,17 +742,17 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 	weekdays := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 	for i, label := range weekdays {
 		x := gridLeft + (i * cellW)
-		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorBlack, r.headerFace)
+		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorRed, r.crispFace)
 	}
 
-	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, 1)
+	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, 2)
 	for i := 0; i <= 7; i++ {
 		x := gridLeft + i*cellW
-		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, 1)
+		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, 2)
 	}
 	for row := 0; row <= len(weeks); row++ {
 		y := gridTop + headerHeight + row*cellH
-		drawLine(img, gridLeft, y, gridRight, y, colorBlack, 1)
+		drawLine(img, gridLeft, y, gridRight, y, colorBlack, 2)
 	}
 
 	for rowIdx, week := range weeks {
@@ -770,9 +765,10 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 			x1 := x0 + cellW
 			y1 := y0 + cellH
 
-			r.drawText(img, x0+6, y0+18, strconv.Itoa(dayNum), colorBlack, r.bodyFace)
+			r.drawText(img, x0+6, y0+18, strconv.Itoa(dayNum), colorBlack, r.crispFace)
 			if dayNum == today.Day() {
-				drawRect(img, image.Rect(x0+1, y0+1, x1-1, y1-1), colorRed, 2)
+				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 3)
+				fillRect(img, image.Rect(x0+cellW-14, y0+2, x0+cellW-4, y0+12), colorRed)
 			}
 
 			row := monthData[dayNum]
@@ -790,56 +786,6 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 	}
 
 	return img
-}
-
-func (r *renderer) drawStreakPanel(img draw.Image, rect image.Rectangle, current, best, todayScore int) {
-	drawRect(img, rect, colorBlack, 1)
-	drawLine(img, rect.Min.X, rect.Min.Y+24, rect.Max.X, rect.Min.Y+24, colorBlack, 1)
-	r.drawText(img, rect.Min.X+8, rect.Min.Y+17, "Streak", colorBlack, r.headerFace)
-	r.drawText(img, rect.Min.X+74, rect.Min.Y+17, fmt.Sprintf("%dd current / %dd best", current, best), colorBlack, r.smallFace)
-	r.drawText(img, rect.Min.X+8, rect.Min.Y+46, "Today", colorBlack, r.headerFace)
-	scoreColor := colorBlack
-	if todayScore < 3 {
-		scoreColor = colorRed
-	}
-	r.drawText(img, rect.Min.X+74, rect.Min.Y+46, fmt.Sprintf("%d / 3", todayScore), scoreColor, r.smallFace)
-}
-
-func (r *renderer) drawMoodCat(img draw.Image, rect image.Rectangle, level int) {
-	fillRect(img, rect, colorWhite)
-	r.drawText(img, rect.Min.X+8, rect.Min.Y+16, fmt.Sprintf("Mood %d/9", level), colorBlack, r.smallFace)
-
-	cx := rect.Min.X + 75
-	cy := rect.Min.Y + 78
-	headR := 34
-	drawCircleOutline(img, cx, cy, headR, colorBlack, 2)
-	drawTriangle(img, image.Pt(cx-26, cy-20), image.Pt(cx-40, cy-48), image.Pt(cx-8, cy-36), colorBlack)
-	drawTriangle(img, image.Pt(cx+26, cy-20), image.Pt(cx+40, cy-48), image.Pt(cx+8, cy-36), colorBlack)
-
-	eyeTilt := (4 - level/2)
-	drawLine(img, cx-16, cy-10-eyeTilt, cx-4, cy-6+eyeTilt, colorBlack, 2)
-	drawLine(img, cx+4, cy-6+eyeTilt, cx+16, cy-10-eyeTilt, colorBlack, 2)
-	drawCircleFilled(img, cx-10, cy-2, 2, colorBlack)
-	drawCircleFilled(img, cx+10, cy-2, 2, colorBlack)
-	drawCircleFilled(img, cx, cy+6, 2, colorRed)
-
-	mouthLift := float64(level-4) * 1.6
-	lastX, lastY := 0, 0
-	for step := 0; step <= 20; step++ {
-		x := -16 + step
-		y := int(math.Round((float64(x*x) / 42.0) - mouthLift))
-		px := cx + x
-		py := cy + 16 + y
-		if step > 0 {
-			drawLine(img, lastX, lastY, px, py, colorBlack, 2)
-		}
-		lastX, lastY = px, py
-	}
-
-	if level >= 7 {
-		drawCircleFilled(img, cx-24, cy+10, 4, colorRed)
-		drawCircleFilled(img, cx+24, cy+10, 4, colorRed)
-	}
 }
 
 func monthWeeks(year int, month time.Month) [][]int {
@@ -860,14 +806,14 @@ func monthWeeks(year int, month time.Month) [][]int {
 }
 
 func drawBookLines(img draw.Image, x, y, w, h int) {
-	drawLine(img, x, y, x+w, y, colorBlack, 2)
-	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 2)
-	drawLine(img, x, y+h, x+w, y+h, colorBlack, 2)
+	drawLine(img, x, y, x+w, y, colorBlack, 4)
+	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 4)
+	drawLine(img, x, y+h, x+w, y+h, colorBlack, 4)
 }
 
 func drawJournalHatch(img draw.Image, x, y, w, h int) {
-	for step := -h; step < w+h; step += 4 {
-		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 2)
+	for step := -h; step < w+h; step += 5 {
+		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 4)
 	}
 }
 
@@ -882,7 +828,7 @@ func drawBolt(img draw.Image, x, y, w, h int) {
 	}
 	for i := 0; i < len(points); i++ {
 		next := points[(i+1)%len(points)]
-		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 2)
+		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 4)
 	}
 }
 
@@ -913,33 +859,6 @@ func drawRect(img draw.Image, rect image.Rectangle, col color.Color, width int) 
 
 func fillRect(img draw.Image, rect image.Rectangle, col color.Color) {
 	draw.Draw(img, rect, &image.Uniform{col}, image.Point{}, draw.Src)
-}
-
-func drawCircleOutline(img draw.Image, cx, cy, r int, col color.Color, width int) {
-	for ring := 0; ring < width; ring++ {
-		radius := r - ring
-		for deg := 0.0; deg < 360; deg += 0.5 {
-			x := cx + int(math.Round(math.Cos(deg*math.Pi/180.0)*float64(radius)))
-			y := cy + int(math.Round(math.Sin(deg*math.Pi/180.0)*float64(radius)))
-			setPixel(img, x, y, col)
-		}
-	}
-}
-
-func drawCircleFilled(img draw.Image, cx, cy, r int, col color.Color) {
-	for y := -r; y <= r; y++ {
-		for x := -r; x <= r; x++ {
-			if x*x+y*y <= r*r {
-				setPixel(img, cx+x, cy+y, col)
-			}
-		}
-	}
-}
-
-func drawTriangle(img draw.Image, p1, p2, p3 image.Point, col color.Color) {
-	drawLine(img, p1.X, p1.Y, p2.X, p2.Y, col, 2)
-	drawLine(img, p2.X, p2.Y, p3.X, p3.Y, col, 2)
-	drawLine(img, p3.X, p3.Y, p1.X, p1.Y, col, 2)
 }
 
 func drawLine(img draw.Image, x0, y0, x1, y1 int, col color.Color, width int) {
