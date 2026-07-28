@@ -76,6 +76,9 @@ func displayImage(img image.Image) error {
 	if err := dev.init(); err != nil {
 		return fmt.Errorf("initialize panel: %w", err)
 	}
+	if err := dev.clear(); err != nil {
+		return fmt.Errorf("clear panel: %w", err)
+	}
 	black, red := splitDisplayLayers(img)
 	if err := dev.display(black, red); err != nil {
 		return fmt.Errorf("display image: %w", err)
@@ -135,6 +138,33 @@ func (e *epd) init() error {
 		return err
 	}
 	return e.sendData(0x22)
+}
+
+func (e *epd) clear() error {
+	rowBytes := canvasWidth / 8
+	whiteBlackLayer := make([]byte, rowBytes*canvasHeight)
+	whiteRedLayer := make([]byte, rowBytes*canvasHeight)
+	for i := range whiteBlackLayer {
+		whiteBlackLayer[i] = 0xFF
+	}
+
+	if err := e.sendCommand(0x10); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes(whiteBlackLayer); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x13); err != nil {
+		return err
+	}
+	if err := e.sendDataBytes(whiteRedLayer); err != nil {
+		return err
+	}
+	if err := e.sendCommand(0x12); err != nil {
+		return err
+	}
+	time.Sleep(100 * time.Millisecond)
+	return e.waitUntilIdle(180 * time.Second)
 }
 
 func (e *epd) display(black, red []byte) error {

@@ -742,17 +742,18 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 	weekdays := []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 	for i, label := range weekdays {
 		x := gridLeft + (i * cellW)
-		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorRed, r.crispFace)
+		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorBlack, r.headerFace)
 	}
 
-	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, 2)
+	const gridLineWidth = 3
+	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, gridLineWidth)
 	for i := 0; i <= 7; i++ {
 		x := gridLeft + i*cellW
-		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, 2)
+		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, gridLineWidth)
 	}
 	for row := 0; row <= len(weeks); row++ {
 		y := gridTop + headerHeight + row*cellH
-		drawLine(img, gridLeft, y, gridRight, y, colorBlack, 2)
+		drawLine(img, gridLeft, y, gridRight, y, colorBlack, gridLineWidth)
 	}
 
 	for rowIdx, week := range weeks {
@@ -765,9 +766,9 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 			x1 := x0 + cellW
 			y1 := y0 + cellH
 
-			r.drawText(img, x0+6, y0+18, strconv.Itoa(dayNum), colorBlack, r.crispFace)
+			r.drawText(img, x0+7, y0+20, strconv.Itoa(dayNum), colorBlack, r.headerFace)
 			if dayNum == today.Day() {
-				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 3)
+				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 4)
 				fillRect(img, image.Rect(x0+cellW-14, y0+2, x0+cellW-4, y0+12), colorRed)
 			}
 
@@ -806,14 +807,14 @@ func monthWeeks(year int, month time.Month) [][]int {
 }
 
 func drawBookLines(img draw.Image, x, y, w, h int) {
-	drawLine(img, x, y, x+w, y, colorBlack, 4)
-	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 4)
-	drawLine(img, x, y+h, x+w, y+h, colorBlack, 4)
+	drawLine(img, x, y, x+w, y, colorBlack, 5)
+	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 5)
+	drawLine(img, x, y+h, x+w, y+h, colorBlack, 5)
 }
 
 func drawJournalHatch(img draw.Image, x, y, w, h int) {
-	for step := -h; step < w+h; step += 5 {
-		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 4)
+	for step := -h; step < w+h; step += 6 {
+		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 5)
 	}
 }
 
@@ -828,7 +829,7 @@ func drawBolt(img draw.Image, x, y, w, h int) {
 	}
 	for i := 0; i < len(points); i++ {
 		next := points[(i+1)%len(points)]
-		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 4)
+		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 5)
 	}
 }
 

@@ -118,10 +118,10 @@ def render_month(year, month, month_data, ytd_totals, mood_level=None, today=Non
     # Grid lines
     for i in range(8):
         x = grid_left + i * cell_w
-        draw.line((x, grid_top + header_height, x, grid_top + header_height + cell_h * num_weeks), fill=cfg.black, width=2)
+        draw.line((x, grid_top + header_height, x, grid_top + header_height + cell_h * num_weeks), fill=cfg.black, width=3)
     for r in range(num_weeks + 1):
         y = grid_top + header_height + r * cell_h
-        draw.line((grid_left, y, grid_right, y), fill=cfg.black, width=2)
+        draw.line((grid_left, y, grid_right, y), fill=cfg.black, width=3)
 
     # Days and marks
     for r, week in enumerate(weeks):
@@ -138,7 +138,7 @@ def render_month(year, month, month_data, ytd_totals, mood_level=None, today=Non
 
             # Today highlight
             if today.year == year and today.month == month and today.day == day_num:
-                draw.rectangle((x0 + 2, y0 + 2, x1 - 2, y1 - 2), outline=cfg.red, width=3)
+                draw.rectangle((x0 + 2, y0 + 2, x1 - 2, y1 - 2), outline=cfg.red, width=4)
 
             read, journal, workout = month_data.get(day_num, (0, 0, 0))
 
