@@ -39,8 +39,6 @@ def main():
     epd = epd7in5b_V2.EPD()
     print("Waveshare display: init", flush=True)
     epd.init()
-    print("Waveshare display: clear", flush=True)
-    epd.Clear()
     print("Waveshare display: image", flush=True)
     epd.display(black, red)
     print("Waveshare display: sleep", flush=True)
