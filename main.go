@@ -248,15 +248,7 @@ func (s *server) renderCurrentMonth(now time.Time) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	streakCurrent, streakBest, err := computeStreaks(s.db, now)
-	if err != nil {
-		return nil, err
-	}
-	todayState, err := getDay(s.db, now.Format(time.DateOnly))
-	if err != nil {
-		return nil, err
-	}
-	img := s.renderer.renderMonth(now, monthData, ytd, streakCurrent, streakBest, todayState.Read+todayState.Journal+todayState.Workout)
+	img := s.renderer.renderMonth(now, monthData, ytd)
 	return img, nil
 }
 
@@ -724,15 +716,21 @@ func writePNG(path string, img image.Image) error {
 	return png.Encode(file, img)
 }
 
-func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd totals, streakCurrent, streakBest, todayScore int) *image.RGBA {
+func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd totals) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, canvasWidth, canvasHeight))
 	draw.Draw(img, img.Bounds(), &image.Uniform{colorWhite}, image.Point{}, draw.Src)
 
 	r.drawText(img, 20, 48, today.Format("January 2006"), colorBlack, r.titleFace)
-	r.drawText(img, 20, 76, "Current Month", colorRed, r.crispFace)
-	r.drawSummaryPanel(img, image.Rect(500, 18, 780, 138), ytd, streakCurrent, streakBest, todayScore)
+	r.drawText(
+		img,
+		20,
+		78,
+		fmt.Sprintf("YTD   READ %d   JOURNAL %d   WORKOUT %d", ytd.Read, ytd.Journal, ytd.Workout),
+		colorBlack,
+		r.headerFace,
+	)
 
-	gridTop := 158
+	gridTop := 96
 	gridLeft := 20
 	gridRight := canvasWidth - 20
 	gridBottom := canvasHeight - 20
@@ -747,14 +745,14 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorRed, r.crispFace)
 	}
 
-	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, 1)
+	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, 2)
 	for i := 0; i <= 7; i++ {
 		x := gridLeft + i*cellW
-		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, 1)
+		drawLine(img, x, gridTop+headerHeight, x, gridTop+headerHeight+cellH*len(weeks), colorBlack, 2)
 	}
 	for row := 0; row <= len(weeks); row++ {
 		y := gridTop + headerHeight + row*cellH
-		drawLine(img, gridLeft, y, gridRight, y, colorBlack, 1)
+		drawLine(img, gridLeft, y, gridRight, y, colorBlack, 2)
 	}
 
 	for rowIdx, week := range weeks {
@@ -769,7 +767,7 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 
 			r.drawText(img, x0+6, y0+18, strconv.Itoa(dayNum), colorBlack, r.crispFace)
 			if dayNum == today.Day() {
-				drawRect(img, image.Rect(x0+1, y0+1, x1-1, y1-1), colorRed, 2)
+				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 3)
 				fillRect(img, image.Rect(x0+cellW-14, y0+2, x0+cellW-4, y0+12), colorRed)
 			}
 
@@ -790,30 +788,6 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 	return img
 }
 
-func (r *renderer) drawSummaryPanel(img draw.Image, rect image.Rectangle, ytd totals, current, best, todayScore int) {
-	drawRect(img, rect, colorRed, 2)
-	drawLine(img, rect.Min.X, rect.Min.Y+28, rect.Max.X, rect.Min.Y+28, colorRed, 2)
-	r.drawText(img, rect.Min.X+10, rect.Min.Y+18, "TODAY", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+92, rect.Min.Y+18, fmt.Sprintf("%d / 3", todayScore), colorBlack, r.headerFace)
-	r.drawText(img, rect.Min.X+160, rect.Min.Y+18, "STREAK", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+246, rect.Min.Y+18, fmt.Sprintf("%dd", current), colorBlack, r.headerFace)
-
-	r.drawText(img, rect.Min.X+10, rect.Min.Y+48, "BEST", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+68, rect.Min.Y+48, fmt.Sprintf("%dd", best), colorBlack, r.bodyFace)
-	r.drawText(img, rect.Min.X+128, rect.Min.Y+48, "YTD", colorRed, r.crispFace)
-
-	r.drawText(img, rect.Min.X+10, rect.Min.Y+74, "READ", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+72, rect.Min.Y+74, strconv.Itoa(ytd.Read), colorBlack, r.bodyFace)
-	r.drawText(img, rect.Min.X+110, rect.Min.Y+74, "JOURNAL", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+204, rect.Min.Y+74, strconv.Itoa(ytd.Journal), colorBlack, r.bodyFace)
-
-	r.drawText(img, rect.Min.X+10, rect.Min.Y+100, "WORKOUT", colorRed, r.crispFace)
-	r.drawText(img, rect.Min.X+112, rect.Min.Y+100, strconv.Itoa(ytd.Workout), colorBlack, r.bodyFace)
-	if todayScore < 3 {
-		fillRect(img, image.Rect(rect.Max.X-28, rect.Min.Y+8, rect.Max.X-10, rect.Min.Y+26), colorRed)
-	}
-}
-
 func monthWeeks(year int, month time.Month) [][]int {
 	first := time.Date(year, month, 1, 0, 0, 0, 0, time.Local)
 	daysInMonth := first.AddDate(0, 1, -1).Day()
@@ -832,14 +806,14 @@ func monthWeeks(year int, month time.Month) [][]int {
 }
 
 func drawBookLines(img draw.Image, x, y, w, h int) {
-	drawLine(img, x, y, x+w, y, colorBlack, 3)
-	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 3)
-	drawLine(img, x, y+h, x+w, y+h, colorBlack, 3)
+	drawLine(img, x, y, x+w, y, colorBlack, 4)
+	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 4)
+	drawLine(img, x, y+h, x+w, y+h, colorBlack, 4)
 }
 
 func drawJournalHatch(img draw.Image, x, y, w, h int) {
-	for step := -h; step < w+h; step += 4 {
-		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 3)
+	for step := -h; step < w+h; step += 5 {
+		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 4)
 	}
 }
 
@@ -854,7 +828,7 @@ func drawBolt(img draw.Image, x, y, w, h int) {
 	}
 	for i := 0; i < len(points); i++ {
 		next := points[(i+1)%len(points)]
-		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 3)
+		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 4)
 	}
 }
 

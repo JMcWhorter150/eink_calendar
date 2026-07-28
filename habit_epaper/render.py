@@ -45,19 +45,6 @@ def compute_weighted_mood(last_14_rows):
     return max(0, min(9, level))
 
 
-def _draw_streak_widget(draw, box, streak_current, streak_best, today_score, cfg):
-    x0, y0, x1, y1 = box
-    draw.rectangle((x0, y0, x1, y1), outline=cfg.black, width=1)
-    draw.line((x0, y0 + 24, x1, y0 + 24), fill=cfg.black, width=1)
-
-    title_font = _load_font(14, bold=True)
-    value_font = _load_font(13)
-    draw.text((x0 + 8, y0 + 4), "Streak", font=title_font, fill=cfg.black)
-    draw.text((x0 + 60, y0 + 4), f"{streak_current}d / best {streak_best}d", font=value_font, fill=cfg.black)
-    draw.text((x0 + 8, y0 + 30), "Today", font=title_font, fill=cfg.black)
-    draw.text((x0 + 60, y0 + 30), f"{today_score}/3", font=value_font, fill=cfg.red if today_score < 3 else cfg.black)
-
-
 def _draw_read_dots(draw, x, y, w, h, cfg):
     radius = max(2, min(w, h) // 7)
     centers = (
@@ -72,11 +59,11 @@ def _draw_read_dots(draw, x, y, w, h, cfg):
 def _draw_journal_slashes(draw, x, y, w, h, cfg):
     step = max(4, w // 4)
     for i in range(-h, w + h, step):
-        draw.line((x + i, y + h, x + i + h, y), fill=cfg.red, width=2)
+        draw.line((x + i, y + h, x + i + h, y), fill=cfg.red, width=3)
 
 
 def _draw_workout_checker(draw, x, y, w, h, cfg):
-    draw.rectangle((x, y, x + w, y + h), outline=cfg.black, width=1)
+    draw.rectangle((x, y, x + w, y + h), outline=cfg.black, width=2)
     cols = 4
     rows = 3
     cell_w = max(2, w // cols)
@@ -92,7 +79,7 @@ def _draw_workout_checker(draw, x, y, w, h, cfg):
                     draw.rectangle((cx0, cy0, cx1, cy1), fill=cfg.black)
 
 
-def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cfg=None, streak_current=0, streak_best=0, today_score=0):
+def render_month(year, month, month_data, ytd_totals, mood_level=None, today=None, cfg=None, **_unused):
     cfg = cfg or RenderConfig()
     img = Image.new("RGB", (cfg.width, cfg.height), cfg.white)
     draw = ImageDraw.Draw(img)
@@ -101,15 +88,12 @@ def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cf
         today = date.today()
 
     title_font = _load_font(28, bold=True)
-    small_font = _load_font(14)
+    small_font = _load_font(14, bold=True)
     month_name = date(year, month, 1).strftime("%B %Y")
     draw.text((cfg.margin, cfg.margin), month_name, font=title_font, fill=cfg.black)
 
-    ytd_text = f"YTD totals  Read: {ytd_totals['read']}  Journal: {ytd_totals['journal']}  Workout: {ytd_totals['workout']}"
+    ytd_text = f"YTD   READ {ytd_totals['read']}   JOURNAL {ytd_totals['journal']}   WORKOUT {ytd_totals['workout']}"
     draw.text((cfg.margin, cfg.margin + 36), ytd_text, font=small_font, fill=cfg.black)
-
-    widget_box = (cfg.width - 260, cfg.margin, cfg.width - cfg.margin, cfg.margin + 52)
-    _draw_streak_widget(draw, widget_box, streak_current, streak_best, today_score, cfg)
 
     # Grid
     grid_top = cfg.margin + 80
@@ -134,10 +118,10 @@ def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cf
     # Grid lines
     for i in range(8):
         x = grid_left + i * cell_w
-        draw.line((x, grid_top + header_height, x, grid_top + header_height + cell_h * num_weeks), fill=cfg.black, width=1)
+        draw.line((x, grid_top + header_height, x, grid_top + header_height + cell_h * num_weeks), fill=cfg.black, width=2)
     for r in range(num_weeks + 1):
         y = grid_top + header_height + r * cell_h
-        draw.line((grid_left, y, grid_right, y), fill=cfg.black, width=1)
+        draw.line((grid_left, y, grid_right, y), fill=cfg.black, width=2)
 
     # Days and marks
     for r, week in enumerate(weeks):
@@ -154,7 +138,7 @@ def render_month(year, month, month_data, ytd_totals, mood_level, today=None, cf
 
             # Today highlight
             if today.year == year and today.month == month and today.day == day_num:
-                draw.rectangle((x0 + 1, y0 + 1, x1 - 1, y1 - 1), outline=cfg.red, width=2)
+                draw.rectangle((x0 + 2, y0 + 2, x1 - 2, y1 - 2), outline=cfg.red, width=3)
 
             read, journal, workout = month_data.get(day_num, (0, 0, 0))
 
