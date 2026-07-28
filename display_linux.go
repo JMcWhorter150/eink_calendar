@@ -94,13 +94,13 @@ func (e *epd) init() error {
 	if err := e.sendCommand(0x01); err != nil {
 		return err
 	}
-	if err := e.sendDataBytes([]byte{0x07, 0x07, 0x3f, 0x3f}); err != nil {
+	if err := e.sendDataValues(0x07, 0x07, 0x3f, 0x3f); err != nil {
 		return err
 	}
 	if err := e.sendCommand(0x06); err != nil {
 		return err
 	}
-	if err := e.sendDataBytes([]byte{0x17, 0x17, 0x28, 0x17}); err != nil {
+	if err := e.sendDataValues(0x17, 0x17, 0x28, 0x17); err != nil {
 		return err
 	}
 	if err := e.sendCommand(0x04); err != nil {
@@ -119,7 +119,7 @@ func (e *epd) init() error {
 	if err := e.sendCommand(0x61); err != nil {
 		return err
 	}
-	if err := e.sendDataBytes([]byte{0x03, 0x20, 0x01, 0xE0}); err != nil {
+	if err := e.sendDataValues(0x03, 0x20, 0x01, 0xE0); err != nil {
 		return err
 	}
 	if err := e.sendCommand(0x15); err != nil {
@@ -131,7 +131,7 @@ func (e *epd) init() error {
 	if err := e.sendCommand(0x50); err != nil {
 		return err
 	}
-	if err := e.sendDataBytes([]byte{0x11, 0x07}); err != nil {
+	if err := e.sendDataValues(0x11, 0x07); err != nil {
 		return err
 	}
 	if err := e.sendCommand(0x60); err != nil {
@@ -212,9 +212,7 @@ func (e *epd) reset() {
 	e.rst.High()
 	time.Sleep(200 * time.Millisecond)
 	e.rst.Low()
-	// Waveshare warns that a longer low pulse can activate the driver
-	// board's power-off circuit and leave BUSY asserted indefinitely.
-	time.Sleep(2 * time.Millisecond)
+	time.Sleep(4 * time.Millisecond)
 	e.rst.High()
 	time.Sleep(200 * time.Millisecond)
 }
@@ -222,6 +220,9 @@ func (e *epd) reset() {
 func (e *epd) waitUntilIdle(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
+		if err := e.sendCommand(0x71); err != nil {
+			return err
+		}
 		if e.busy.Read() == rpio.High {
 			time.Sleep(20 * time.Millisecond)
 			return nil
@@ -233,7 +234,7 @@ func (e *epd) waitUntilIdle(timeout time.Duration) error {
 				busyPin,
 			)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 
@@ -247,17 +248,29 @@ func (e *epd) sendData(value byte) error {
 	return e.conn.Tx([]byte{value}, nil)
 }
 
+func (e *epd) sendDataValues(values ...byte) error {
+	for _, value := range values {
+		if err := e.sendData(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *epd) sendDataBytes(data []byte) error {
 	e.dc.High()
+	packets := make([]spi.Packet, 0, (len(data)+maxSPIWrite-1)/maxSPIWrite)
 	for len(data) > 0 {
 		chunkSize := maxSPIWrite
 		if len(data) < chunkSize {
 			chunkSize = len(data)
 		}
-		if err := e.conn.Tx(data[:chunkSize], nil); err != nil {
-			return err
-		}
+		packets = append(packets, spi.Packet{W: data[:chunkSize], KeepCS: true})
 		data = data[chunkSize:]
 	}
-	return nil
+	if len(packets) == 0 {
+		return nil
+	}
+	packets[len(packets)-1].KeepCS = false
+	return e.conn.TxPackets(packets)
 }
