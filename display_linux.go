@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"image"
 	"time"
@@ -63,15 +62,16 @@ func displayImage(img image.Image) error {
 	dev.rst.Output()
 	dev.dc.Output()
 	dev.busy.Input()
+	dev.busy.PullDown()
 	dev.pwr.Output()
 
 	// Start every operation from a known power state. This also recovers a
 	// controller left busy after an interrupted or timed-out refresh.
 	dev.pwr.Low()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	dev.pwr.High()
 	defer dev.pwr.Low()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	if err := dev.init(); err != nil {
 		return fmt.Errorf("initialize panel: %w", err)
@@ -182,7 +182,9 @@ func (e *epd) reset() {
 	e.rst.High()
 	time.Sleep(200 * time.Millisecond)
 	e.rst.Low()
-	time.Sleep(5 * time.Millisecond)
+	// Waveshare warns that a longer low pulse can activate the driver
+	// board's power-off circuit and leave BUSY asserted indefinitely.
+	time.Sleep(2 * time.Millisecond)
 	e.rst.High()
 	time.Sleep(200 * time.Millisecond)
 }
@@ -190,17 +192,13 @@ func (e *epd) reset() {
 func (e *epd) waitUntilIdle(timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		if err := e.sendCommand(0x71); err != nil {
-			return err
-		}
 		if e.busy.Read() == rpio.High {
 			time.Sleep(20 * time.Millisecond)
 			return nil
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf(
-				"%w after %s waiting for BUSY GPIO %d to go high",
-				errors.New("e-paper busy timeout"),
+				"e-paper busy timeout after %s waiting for BUSY GPIO %d to go high",
 				timeout,
 				busyPin,
 			)
