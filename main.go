@@ -24,8 +24,8 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/gomedium"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
@@ -70,6 +70,8 @@ type server struct {
 	refreshRequested bool
 	lastRefresh      time.Time
 	lastRefreshError string
+	eventMu          sync.Mutex
+	eventClients     map[chan struct{}]struct{}
 }
 
 type renderer struct {
@@ -77,7 +79,6 @@ type renderer struct {
 	headerFace font.Face
 	bodyFace   font.Face
 	smallFace  font.Face
-	crispFace  font.Face
 }
 
 type faceSpec struct {
@@ -113,10 +114,11 @@ func main() {
 	}
 
 	s := &server{
-		db:       db,
-		renderer: rndr,
-		addr:     *addr,
-		dbPath:   *dbPath,
+		db:           db,
+		renderer:     rndr,
+		addr:         *addr,
+		dbPath:       *dbPath,
+		eventClients: make(map[chan struct{}]struct{}),
 	}
 
 	if err := initDB(db); err != nil {
@@ -137,6 +139,7 @@ func main() {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/state", s.handleState)
+	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/habit/set", s.handleHabitSet)
 	mux.HandleFunc("/habit/toggle", s.handleHabitToggle)
 	mux.HandleFunc("/mood/override", s.handleMoodOverride)
@@ -208,7 +211,7 @@ func newRenderer() (*renderer, error) {
 	if err != nil {
 		return nil, err
 	}
-	headerFace, err := makeFace(faceSpec{size: 16, src: gobold.TTF})
+	headerFace, err := makeFace(faceSpec{size: 16, src: gomedium.TTF})
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +229,6 @@ func newRenderer() (*renderer, error) {
 		headerFace: headerFace,
 		bodyFace:   bodyFace,
 		smallFace:  smallFace,
-		crispFace:  basicfont.Face7x13,
 	}, nil
 }
 
@@ -284,20 +286,47 @@ func (s *server) shouldRefreshNow() bool {
 
 func (s *server) setRefreshRequested() {
 	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
 	s.refreshRequested = true
+	s.refreshMu.Unlock()
+	s.notifyStateChange()
 }
 
 func (s *server) setRefreshError(msg string) {
 	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
 	s.lastRefreshError = msg
+	s.refreshMu.Unlock()
+	s.notifyStateChange()
 }
 
 func (s *server) snapshotRefreshState() (queued bool, last time.Time, lastErr string) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
 	return s.refreshRequested, s.lastRefresh, s.lastRefreshError
+}
+
+func (s *server) notifyStateChange() {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	for client := range s.eventClients {
+		select {
+		case client <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *server) subscribeStateChanges() chan struct{} {
+	client := make(chan struct{}, 1)
+	s.eventMu.Lock()
+	s.eventClients[client] = struct{}{}
+	s.eventMu.Unlock()
+	return client
+}
+
+func (s *server) unsubscribeStateChanges(client chan struct{}) {
+	s.eventMu.Lock()
+	delete(s.eventClients, client)
+	s.eventMu.Unlock()
 }
 
 func (s *server) performRefresh() error {
@@ -345,13 +374,21 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	row, err := getDay(s.db, day.Format(time.DateOnly))
+	resp, err := s.stateForDay(day)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *server) stateForDay(day time.Time) (stateResponse, error) {
+	row, err := getDay(s.db, day.Format(time.DateOnly))
+	if err != nil {
+		return stateResponse{}, err
+	}
 	queued, last, lastErr := s.snapshotRefreshState()
-	resp := stateResponse{
+	return stateResponse{
 		Day:              day.Format(time.DateOnly),
 		Read:             row.Read,
 		Journal:          row.Journal,
@@ -359,8 +396,66 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		RefreshQueued:    queued,
 		LastRefresh:      displayTime(last),
 		LastRefreshError: lastErr,
+	}, nil
+}
+
+func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	client := s.subscribeStateChanges()
+	defer s.unsubscribeStateChanges(client)
+	keepAlive := time.NewTicker(30 * time.Second)
+	defer keepAlive.Stop()
+
+	sendState := func() error {
+		now := time.Now()
+		day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		state, err := s.stateForDay(day)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "event: state\ndata: %s\n\n", payload)
+		if err == nil {
+			flusher.Flush()
+		}
+		return err
+	}
+
+	if err := sendState(); err != nil {
+		return
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-client:
+			if err := sendState(); err != nil {
+				return
+			}
+		case <-keepAlive.C:
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 func (s *server) handleHabitSet(w http.ResponseWriter, r *http.Request) {
@@ -946,78 +1041,184 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
   <title>Habit ePaper</title>
   <style>
     :root {
-      --bg: #f4f0e6;
-      --ink: #181512;
-      --paper: #fff9ef;
-      --read: #eadfc2;
-      --journal: #f2c7be;
-      --workout: #cfdcce;
-      --refresh: #d6dbe8;
-      --active: #181512;
-      --inactive: rgba(24,21,18,0.28);
+      --bg: #f2eee5;
+      --ink: #24221e;
+      --muted: #716c62;
+      --paper: #fffdf8;
+      --read: #f0e3bd;
+      --journal: #efc8c0;
+      --workout: #ceddce;
+      --refresh: #d7deeb;
+      --active: #24221e;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
       margin: 0;
-      min-height: 100vh;
-      font-family: Georgia, "Times New Roman", serif;
+      height: 100dvh;
+      overflow: hidden;
+      font-family: ui-rounded, "Avenir Next", "Segoe UI", system-ui, sans-serif;
       background:
-        radial-gradient(circle at top, rgba(255,255,255,0.75), transparent 30%),
+        radial-gradient(circle at top, rgba(255,255,255,0.9), transparent 34%),
         linear-gradient(160deg, #ede5d2, var(--bg));
       color: var(--ink);
+      display: flex;
+      justify-content: center;
+    }
+    .app {
+      width: min(760px, 100%);
+      height: 100%;
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto minmax(0, 1fr);
+      background: color-mix(in srgb, var(--paper) 82%, transparent);
+      box-shadow: 0 18px 60px rgba(55, 45, 30, 0.12);
     }
     .status {
-      padding: 12px 16px;
-      background: rgba(255,249,239,0.92);
+      padding: clamp(14px, 2.5vh, 24px) clamp(18px, 4vw, 32px);
+      background: rgba(255,253,248,0.94);
       border-bottom: 1px solid rgba(24,21,18,0.14);
-      font-size: 14px;
-      line-height: 1.4;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+    }
+    .eyebrow {
+      margin: 0 0 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .date {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(22px, 4vw, 34px);
+      font-weight: 600;
+      line-height: 1.05;
+    }
+    .meta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      max-width: 54%;
+      color: var(--muted);
+      font-size: clamp(12px, 1.8vw, 14px);
+      line-height: 1.3;
+      text-align: right;
+    }
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #8a9586;
+      box-shadow: 0 0 0 4px rgba(138,149,134,0.13);
+    }
+    .meta.queued .status-dot {
+      background: #ba792c;
+      box-shadow: 0 0 0 4px rgba(186,121,44,0.13);
+    }
+    .meta.error .status-dot {
+      background: #b74739;
+      box-shadow: 0 0 0 4px rgba(183,71,57,0.13);
     }
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       grid-template-rows: 1fr 1fr;
-      min-height: calc(100vh - 70px);
+      min-height: 0;
+      gap: clamp(8px, 1.4vw, 14px);
+      padding: clamp(8px, 1.4vw, 14px);
     }
     button {
-      border: 1px solid rgba(24,21,18,0.12);
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid rgba(36,34,30,0.1);
+      border-radius: clamp(14px, 2.5vw, 24px);
       font: inherit;
-      font-size: 11vw;
-      font-weight: 700;
-      letter-spacing: 0.04em;
       color: var(--ink);
-      padding: 24px;
-      text-transform: uppercase;
+      padding: clamp(16px, 3vw, 28px);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: 5px;
+      overflow: hidden;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:active { transform: scale(0.985); }
+    .button-label {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(24px, 6vmin, 50px);
+      font-weight: 600;
+      line-height: 0.95;
+    }
+    .button-state {
+      color: rgba(36,34,30,0.62);
+      font-size: clamp(11px, 1.8vmin, 14px);
+      font-weight: 650;
+      letter-spacing: 0.02em;
     }
     .read { background: var(--read); }
     .journal { background: var(--journal); }
     .workout { background: var(--workout); }
     .refresh { background: var(--refresh); }
-    .active { box-shadow: inset 0 0 0 10px var(--active); }
-    .inactive { box-shadow: inset 0 0 0 10px transparent; }
-    .meta { font-size: 13px; opacity: 0.78; }
-    @media (min-width: 700px) {
-      body { place-items: center; }
-      .status, .grid {
-        width: min(520px, 100vw);
-      }
-      .grid { min-height: 720px; }
-      button { font-size: 52px; }
+    .active {
+      box-shadow: inset 0 0 0 4px var(--active), 0 8px 24px rgba(36,34,30,0.09);
+    }
+    .active::after {
+      content: "✓";
+      position: absolute;
+      top: clamp(14px, 2.5vw, 24px);
+      right: clamp(14px, 2.5vw, 24px);
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--ink);
+      color: white;
+      font-size: 17px;
+      font-weight: 800;
+    }
+    @media (max-width: 520px) {
+      .status { align-items: center; }
+      .meta { max-width: 48%; }
+      .grid { gap: 7px; padding: 7px; }
+      button { border-radius: 15px; }
+    }
+    @media (max-height: 520px) {
+      .status { padding-block: 10px; }
+      .eyebrow { display: none; }
+      .date { font-size: 22px; }
+      .button-label { font-size: clamp(20px, 7vmin, 34px); }
     }
   </style>
 </head>
 <body>
-  <div class="status">
-    <div><strong>Today:</strong> <span id="day">{{.Today}}</span></div>
-    <div class="meta" id="meta">Queued: {{.RefreshQueued}} | Last refresh: {{if .LastRefresh}}{{.LastRefresh}}{{else}}never{{end}}{{if .LastRefreshError}} | Error: {{.LastRefreshError}}{{end}}</div>
-  </div>
-  <div class="grid">
-    <button class="workout inactive" data-habit="workout">Workout</button>
-    <button class="read inactive" data-habit="read">Read</button>
-    <button class="journal inactive" data-habit="journal">Journal</button>
-    <button class="refresh inactive" data-action="refresh">Refresh</button>
+  <div class="app">
+    <header class="status">
+      <div>
+        <p class="eyebrow">Habit calendar</p>
+        <h1 class="date" id="day">{{.Today}}</h1>
+      </div>
+      <div class="meta{{if .RefreshQueued}} queued{{end}}{{if .LastRefreshError}} error{{end}}" id="meta">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="meta-text">{{if .LastRefreshError}}Display needs attention{{else if .RefreshQueued}}Display update queued{{else if .LastRefresh}}Display updated recently{{else}}Display not refreshed yet{{end}}</span>
+      </div>
+    </header>
+    <main class="grid">
+      <button class="workout inactive" data-habit="workout"><span class="button-label">Workout</span><span class="button-state">Not yet today</span></button>
+      <button class="read inactive" data-habit="read"><span class="button-label">Read</span><span class="button-state">Not yet today</span></button>
+      <button class="journal inactive" data-habit="journal"><span class="button-label">Journal</span><span class="button-state">Not yet today</span></button>
+      <button class="refresh inactive" data-action="refresh"><span class="button-label">Refresh</span><span class="button-state">Update the display</span></button>
+    </main>
   </div>
   <script>
     const buttons = {
@@ -1027,6 +1228,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
       refresh: document.querySelector('[data-action="refresh"]'),
     };
     const meta = document.getElementById('meta');
+    const metaText = document.getElementById('meta-text');
 
     async function post(url) {
       const res = await fetch(url, { method: 'POST' });
@@ -1038,31 +1240,84 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
     function setActive(button, active) {
       button.classList.toggle('active', !!active);
       button.classList.toggle('inactive', !active);
+      const state = button.querySelector('.button-state');
+      if (state && button.dataset.habit) {
+        state.textContent = active ? 'Done today' : 'Not yet today';
+      }
     }
 
-    async function syncState() {
-      const res = await fetch('/state');
-      const data = await res.json();
+    function localRefreshTime(value) {
+      if (!value) return '';
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return '';
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(parsed);
+    }
+
+    function setStatus(data) {
+      meta.classList.toggle('queued', !!data.refresh_queued);
+      meta.classList.toggle('error', !!data.last_refresh_error);
+      if (data.last_refresh_error) {
+        metaText.textContent = 'Display needs attention';
+        meta.title = data.last_refresh_error;
+      } else if (data.refresh_queued) {
+        metaText.textContent = 'Display update queued';
+        meta.removeAttribute('title');
+      } else if (data.last_refresh) {
+        metaText.textContent = 'Updated ' + localRefreshTime(data.last_refresh);
+        meta.removeAttribute('title');
+      } else {
+        metaText.textContent = 'Display not refreshed yet';
+        meta.removeAttribute('title');
+      }
+    }
+
+    function applyState(data) {
       setActive(buttons.read, data.read === 1);
       setActive(buttons.journal, data.journal === 1);
       setActive(buttons.workout, data.workout === 1);
       setActive(buttons.refresh, data.refresh_queued);
-      const errorText = data.last_refresh_error ? ' | Error: ' + data.last_refresh_error : '';
-      meta.textContent = 'Queued: ' + data.refresh_queued + ' | Last refresh: ' + (data.last_refresh || 'never') + errorText;
+      buttons.refresh.querySelector('.button-state').textContent =
+        data.refresh_queued ? 'Update queued' : 'Update the display';
+      setStatus(data);
     }
 
     document.querySelectorAll('[data-habit]').forEach((button) => {
       button.addEventListener('click', async () => {
-        await post('/habit/toggle?habit=' + button.dataset.habit);
-        await syncState();
+        try {
+          const data = await post('/habit/toggle?habit=' + button.dataset.habit);
+          setActive(button, data.value === 1);
+        } catch (error) {
+          meta.classList.add('error');
+          metaText.textContent = 'Could not update habit';
+          meta.title = error.message;
+        }
       });
     });
     buttons.refresh.addEventListener('click', async () => {
-      await post('/refresh');
-      await syncState();
+      try {
+        await post('/refresh');
+        setStatus({ refresh_queued: true });
+        buttons.refresh.querySelector('.button-state').textContent = 'Update queued';
+      } catch (error) {
+        meta.classList.add('error');
+        metaText.textContent = 'Could not queue display';
+        meta.title = error.message;
+      }
     });
-    syncState();
-    setInterval(syncState, 10000);
+
+    const events = new EventSource('/events');
+    events.addEventListener('state', (event) => {
+      applyState(JSON.parse(event.data));
+    });
+    events.onerror = () => {
+      meta.classList.remove('queued');
+      meta.classList.add('error');
+      metaText.textContent = 'Reconnecting…';
+      meta.removeAttribute('title');
+    };
   </script>
 </body>
 </html>`))
