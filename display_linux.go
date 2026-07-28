@@ -5,6 +5,9 @@ package main
 import (
 	"fmt"
 	"image"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/stianeikeland/go-rpio/v4"
@@ -32,6 +35,50 @@ type epd struct {
 }
 
 func displayImage(img image.Image) error {
+	if os.Getenv("HABIT_NATIVE_DISPLAY") == "1" {
+		return displayImageNative(img)
+	}
+
+	black, red := splitDisplayLayers(img)
+	for i := range black {
+		// The vendor display method inverts the black buffer, but transmits
+		// the red buffer as supplied.
+		black[i] = ^black[i]
+		red[i] = ^red[i]
+	}
+
+	tempDir, err := os.MkdirTemp("", "habit-epaper-display-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	blackPath := filepath.Join(tempDir, "black.bin")
+	redPath := filepath.Join(tempDir, "red.bin")
+	if err := os.WriteFile(blackPath, black, 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(redPath, red, 0o600); err != nil {
+		return err
+	}
+
+	python := os.Getenv("HABIT_PYTHON")
+	if python == "" {
+		python = "/usr/bin/python3"
+	}
+	helper := os.Getenv("HABIT_WAVESHARE_HELPER")
+	if helper == "" {
+		helper = "habit_epaper/display_waveshare.py"
+	}
+
+	output, err := exec.Command(python, helper, blackPath, redPath).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("Waveshare Python driver failed: %w: %s", err, output)
+	}
+	return nil
+}
+
+func displayImageNative(img image.Image) error {
 	if _, err := host.Init(); err != nil {
 		return err
 	}
