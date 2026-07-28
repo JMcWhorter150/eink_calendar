@@ -24,7 +24,6 @@ import (
 
 	"github.com/mattn/go-sqlite3"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/gomedium"
 	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
@@ -37,7 +36,7 @@ const (
 	minSecondsBetweenRefresh = 300
 	defaultAddr              = ":8000"
 	defaultDBPath            = "habit_epaper/habit.db"
-	displayBlackThreshold    = 220
+	displayBlackThreshold    = 180
 	displayRedThreshold      = 120
 	displayRedDelta          = 20
 )
@@ -203,15 +202,15 @@ func newRenderer() (*renderer, error) {
 		return opentype.NewFace(ttf, &opentype.FaceOptions{
 			Size:    spec.size,
 			DPI:     72,
-			Hinting: font.HintingFull,
+			Hinting: font.HintingNone,
 		})
 	}
 
-	titleFace, err := makeFace(faceSpec{size: 28, src: gobold.TTF})
+	titleFace, err := makeFace(faceSpec{size: 27, src: gomedium.TTF})
 	if err != nil {
 		return nil, err
 	}
-	headerFace, err := makeFace(faceSpec{size: 16, src: gomedium.TTF})
+	headerFace, err := makeFace(faceSpec{size: 15, src: goregular.TTF})
 	if err != nil {
 		return nil, err
 	}
@@ -840,7 +839,7 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 		r.drawCenteredText(img, x, gridTop+18, cellW, label, colorBlack, r.headerFace)
 	}
 
-	const gridLineWidth = 3
+	const gridLineWidth = 2
 	drawLine(img, gridLeft, gridTop+headerHeight, gridRight, gridTop+headerHeight, colorBlack, gridLineWidth)
 	for i := 0; i <= 7; i++ {
 		x := gridLeft + i*cellW
@@ -863,7 +862,7 @@ func (r *renderer) renderMonth(today time.Time, monthData map[int]habitRow, ytd 
 
 			r.drawText(img, x0+7, y0+20, strconv.Itoa(dayNum), colorBlack, r.headerFace)
 			if dayNum == today.Day() {
-				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 4)
+				drawRect(img, image.Rect(x0+2, y0+2, x1-2, y1-2), colorRed, 3)
 				fillRect(img, image.Rect(x0+cellW-14, y0+2, x0+cellW-4, y0+12), colorRed)
 			}
 
@@ -902,14 +901,14 @@ func monthWeeks(year int, month time.Month) [][]int {
 }
 
 func drawBookLines(img draw.Image, x, y, w, h int) {
-	drawLine(img, x, y, x+w, y, colorBlack, 5)
-	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 5)
-	drawLine(img, x, y+h, x+w, y+h, colorBlack, 5)
+	drawLine(img, x, y, x+w, y, colorBlack, 3)
+	drawLine(img, x, y+h/2, x+w, y+h/2, colorBlack, 3)
+	drawLine(img, x, y+h, x+w, y+h, colorBlack, 3)
 }
 
 func drawJournalHatch(img draw.Image, x, y, w, h int) {
-	for step := -h; step < w+h; step += 6 {
-		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 5)
+	for step := -h; step < w+h; step += 5 {
+		drawLine(img, x+step, y+h, x+step+h, y, colorRed, 3)
 	}
 }
 
@@ -924,7 +923,7 @@ func drawBolt(img draw.Image, x, y, w, h int) {
 	}
 	for i := 0; i < len(points); i++ {
 		next := points[(i+1)%len(points)]
-		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 5)
+		drawLine(img, points[i].X, points[i].Y, next.X, next.Y, colorBlack, 3)
 	}
 }
 
