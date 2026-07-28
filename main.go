@@ -22,10 +22,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-fonts/liberation/liberationserifregular"
 	"github.com/mattn/go-sqlite3"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gomedium"
-	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
@@ -206,19 +205,19 @@ func newRenderer() (*renderer, error) {
 		})
 	}
 
-	titleFace, err := makeFace(faceSpec{size: 27, src: gomedium.TTF})
+	titleFace, err := makeFace(faceSpec{size: 30, src: liberationserifregular.TTF})
 	if err != nil {
 		return nil, err
 	}
-	headerFace, err := makeFace(faceSpec{size: 15, src: goregular.TTF})
+	headerFace, err := makeFace(faceSpec{size: 17, src: liberationserifregular.TTF})
 	if err != nil {
 		return nil, err
 	}
-	bodyFace, err := makeFace(faceSpec{size: 14, src: goregular.TTF})
+	bodyFace, err := makeFace(faceSpec{size: 15, src: liberationserifregular.TTF})
 	if err != nil {
 		return nil, err
 	}
-	smallFace, err := makeFace(faceSpec{size: 12, src: goregular.TTF})
+	smallFace, err := makeFace(faceSpec{size: 13, src: liberationserifregular.TTF})
 	if err != nil {
 		return nil, err
 	}
