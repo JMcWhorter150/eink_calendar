@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"time"
 
@@ -18,6 +19,7 @@ const (
 	rstPin      = 17
 	dcPin       = 25
 	busyPin     = 24
+	pwrPin      = 18
 	maxSPIWrite = 4096
 )
 
@@ -27,6 +29,7 @@ type epd struct {
 	rst  rpio.Pin
 	dc   rpio.Pin
 	busy rpio.Pin
+	pwr  rpio.Pin
 }
 
 func displayImage(img image.Image) error {
@@ -55,22 +58,32 @@ func displayImage(img image.Image) error {
 		rst:  rpio.Pin(rstPin),
 		dc:   rpio.Pin(dcPin),
 		busy: rpio.Pin(busyPin),
+		pwr:  rpio.Pin(pwrPin),
 	}
 	dev.rst.Output()
 	dev.dc.Output()
 	dev.busy.Input()
+	dev.pwr.Output()
+
+	// Start every operation from a known power state. This also recovers a
+	// controller left busy after an interrupted or timed-out refresh.
+	dev.pwr.Low()
+	time.Sleep(100 * time.Millisecond)
+	dev.pwr.High()
+	defer dev.pwr.Low()
+	time.Sleep(100 * time.Millisecond)
 
 	if err := dev.init(); err != nil {
-		return err
-	}
-	if err := dev.clear(); err != nil {
-		return err
+		return fmt.Errorf("initialize panel: %w", err)
 	}
 	black, red := splitDisplayLayers(img)
 	if err := dev.display(black, red); err != nil {
-		return err
+		return fmt.Errorf("display image: %w", err)
 	}
-	return dev.sleep()
+	if err := dev.sleep(); err != nil {
+		return fmt.Errorf("sleep panel: %w", err)
+	}
+	return nil
 }
 
 func (e *epd) init() error {
@@ -124,33 +137,6 @@ func (e *epd) init() error {
 	return e.sendData(0x22)
 }
 
-func (e *epd) clear() error {
-	rowBytes := canvasWidth / 8
-	height := canvasHeight
-
-	if err := e.sendCommand(0x10); err != nil {
-		return err
-	}
-	for i := 0; i < rowBytes*height; i++ {
-		if err := e.sendData(0xFF); err != nil {
-			return err
-		}
-	}
-	if err := e.sendCommand(0x13); err != nil {
-		return err
-	}
-	for i := 0; i < rowBytes*height; i++ {
-		if err := e.sendData(0x00); err != nil {
-			return err
-		}
-	}
-	if err := e.sendCommand(0x12); err != nil {
-		return err
-	}
-	time.Sleep(10 * time.Millisecond)
-	return e.waitUntilIdle(180 * time.Second)
-}
-
 func (e *epd) display(black, red []byte) error {
 	if err := e.sendCommand(0x10); err != nil {
 		return err
@@ -171,17 +157,11 @@ func (e *epd) display(black, red []byte) error {
 	if err := e.sendCommand(0x12); err != nil {
 		return err
 	}
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	return e.waitUntilIdle(180 * time.Second)
 }
 
 func (e *epd) sleep() error {
-	if err := e.sendCommand(0x50); err != nil {
-		return err
-	}
-	if err := e.sendData(0xF7); err != nil {
-		return err
-	}
 	if err := e.sendCommand(0x02); err != nil {
 		return err
 	}
@@ -191,7 +171,11 @@ func (e *epd) sleep() error {
 	if err := e.sendCommand(0x07); err != nil {
 		return err
 	}
-	return e.sendData(0xA5)
+	if err := e.sendData(0xA5); err != nil {
+		return err
+	}
+	time.Sleep(2 * time.Second)
+	return nil
 }
 
 func (e *epd) reset() {
@@ -214,7 +198,12 @@ func (e *epd) waitUntilIdle(timeout time.Duration) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return errors.New("timed out waiting for e-paper busy pin")
+			return fmt.Errorf(
+				"%w after %s waiting for BUSY GPIO %d to go high",
+				errors.New("e-paper busy timeout"),
+				timeout,
+				busyPin,
+			)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
